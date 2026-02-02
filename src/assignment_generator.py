@@ -20,7 +20,7 @@ class AssignmentGenerator:
         target_type = self._get_target_type(target)
 
         if isinstance(target, FieldAccess):
-            self._generate_field_assign(target, stmt.expr)
+            self.generate_field_assign(target, stmt.expr)
             return
 
         # 字符串类型单独处理

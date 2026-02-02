@@ -210,6 +210,7 @@ class ExprGenerator:
         cmds = []
         macro_args = {}
         entity_selector = None
+        func_name = expr.callee.name  # 被调用的函数名
 
         for (pname, ptype), arg in zip(params, expr.args):
             if ptype.kind == 'entity':
@@ -252,10 +253,7 @@ class ExprGenerator:
                     macro_args[pname] = temp_arr
 
             else:
-                # 数值类型参数：使用 scoreboard
-                # 关键修复：检查参数类型和实参类型的匹配
-                arg_type = self._infer_expr_type(arg)
-                param_storage = self.ctx.get_storage_name(pname, is_param=True)
+                param_storage = f"{func_name}_{pname}"
 
                 if isinstance(arg, Ident):
                     arg_storage = self.ctx.get_var(arg.name)[0]

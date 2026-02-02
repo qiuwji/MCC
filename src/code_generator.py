@@ -187,6 +187,10 @@ class CodeGenerator:
             if ptype.kind == 'struct':
                 self.ctx.struct_params[pname] = f"$({pname})"
                 self.ctx.current_macro_args[pname] = f"$({pname})"
+                # ========== 关键修复：为结构体参数添加变量声明 ==========
+                storage = self.ctx.get_storage_name(pname, is_param=True)
+                self.ctx.add_var(pname, storage, ptype)
+                # =====================================================
             elif ptype.kind == 'entity':
                 self.ctx.add_var(pname, "@s", ptype)
             elif ptype.kind == 'array':

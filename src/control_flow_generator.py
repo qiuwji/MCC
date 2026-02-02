@@ -134,7 +134,7 @@ class ControlFlowGenerator:
         self.ctx.current_mcfunc = old_func
 
     def _generate_array_foreach(self, stmt: ForStmt):
-        """数组循环 - 修复：从 storage 正确读取数据"""
+        """数组循环 - 修复：正确处理字符串数组"""
         iterable_type = getattr(stmt.iterable, '_type', UNKNOWN)
         arr_expr = stmt.iterable
 
@@ -157,41 +157,29 @@ class ControlFlowGenerator:
             macro_args = self._get_macro_args()
             saved_macro_args = self.ctx.current_macro_args.copy() if self.ctx.current_macro_args else {}
 
-            # ========== 生成 Head 函数（循环条件判断和元素加载） ==========
+            # ========== 生成 Head 函数（循环条件判断和元素加载）==========
             self.ctx.current_mcfunc = head_func
             self.ctx.current_macro_args = saved_macro_args.copy()
 
             actual_length = self.ctx.array_lengths.get(actual_arr)
             upper_bound = min(actual_length if actual_length else 50, 50)
 
-            # 关键修复：根据元素类型生成正确的加载逻辑
-            if elem_type and elem_type.kind == 'struct':
-                # 结构体数组：从 storage 加载每个字段
-                fields = self.ctx.structs.get(elem_type.name, {})
+            # ========== 关键修复：根据元素类型生成正确的加载逻辑 ==========
+            if elem_type and elem_type.kind == 'prim' and elem_type.name == 'string':
+                # 字符串数组：使用 data modify 从 storage 复制到 iter_var（也是 storage 路径）
                 for i in range(upper_bound):
-                    for fname, ftype in fields.items():
-                        if ftype.is_value_type():
-                            # 从 storage 数组读取字段到 scoreboard
-                            scale = 1 if ftype.name == 'int' else 0.01
-                            src_path = f"{actual_arr}[{i}].{fname}"
-                            dst_var = f"{iter_var}_{fname}"
-
-                            # 生成：execute store result score pos_x _tmp run data get storage namespace:data positions[0].x 1
-                            load_cmd = f"execute store result score {dst_var} _tmp run data get storage {self.ctx.namespace}:data {src_path} {scale}"
-                            branch = self.builder.execute_if_score_matches(iter_idx, "_tmp", str(i), load_cmd)
-                            self._emit(branch)
+                    # 字符串复制：data modify storage $(iter_var) set from storage $(arr_path)[i]
+                    branch_cmd = f'execute if score {iter_idx} _tmp matches {i} run data modify storage {self.ctx.namespace}:data {iter_var} set from storage {self.ctx.namespace}:data {actual_arr}[{i}]'
+                    self._emit(branch_cmd)
             elif elem_type and elem_type.is_value_type():
-                # 基础类型数组（int/float）：从 storage 读取
+                # 数值类型数组（int/float）：使用 execute store result score
                 for i in range(upper_bound):
                     scale = 1 if elem_type.name == 'int' else 0.01
-                    src_path = f"{actual_arr}[{i}]"
-
-                    # 生成：execute store result score item _tmp run data get storage namespace:data arr[0] 1
-                    load_cmd = f"execute store result score {iter_var} _tmp run data get storage {self.ctx.namespace}:data {src_path} {scale}"
+                    load_cmd = f"execute store result score {iter_var} _tmp run data get storage {self.ctx.namespace}:data {actual_arr}[{i}] {scale}"
                     branch = self.builder.execute_if_score_matches(iter_idx, "_tmp", str(i), load_cmd)
                     self._emit(branch)
             else:
-                # 兜底：其他类型（理论上不会走到这里）
+                # 兜底：其他类型
                 for i in range(upper_bound):
                     load_cmd = self.builder.copy_score(iter_var, f"{actual_arr}_{i}")
                     branch = self.builder.execute_if_score_matches(iter_idx, "_tmp", str(i), load_cmd)
@@ -201,7 +189,7 @@ class ControlFlowGenerator:
             branch_cmd = self.builder.function_call(f"{func_base}_body", macro_args)
             self._emit(f"execute if score {iter_idx} _tmp < {len_var} _tmp run {branch_cmd}")
 
-            # ========== 生成 Body 函数（循环体执行） ==========
+            # ========== 生成 Body 函数（循环体执行）==========
             self.ctx.current_mcfunc = body_func
             self.ctx.current_macro_args = saved_macro_args.copy()
 

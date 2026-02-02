@@ -8,7 +8,7 @@ MCC 命令行编译器
 示例:
     ./mcc demo.mcc ./my_datapack 1.21.4
     ./mcc skills.mcc ./output
-    python3 mcc.py src/main.mcc ./dist 1.20.5
+    python3 mcc.py src/main.mcd ./dist 1.20.5
 """
 
 import sys
