@@ -189,11 +189,11 @@ let score = 85
 
 if score >= 90 {
     cmd "say 优秀"
-} else if score >= 60 {
-    cmd "say 及格"
 } else {
     cmd "say 不及格"
 }
+
+// 暂不支持 else if语法
 ```
 
 ### for 循环
