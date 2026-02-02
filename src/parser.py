@@ -1,7 +1,8 @@
 from ply import yacc
 
+from ply import yacc
 from ast_nodes import *
-from lexer import lexer
+from lexer import lexer, tokens
 
 start = 'program'
 

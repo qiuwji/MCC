@@ -23,13 +23,9 @@ class StructGenerator:
         return cmds
 
     def gen_struct_init_storage(self, expr, target_path: str, struct_name: str) -> List[str]:
-        """生成将结构体初始化到 storage 路径的命令（用于数组元素初始化）"""
         cmds = []
         fields = self.ctx.structs.get(struct_name, {})
         fields_dict = self._extract_fields(expr)
-
-        # 初始化空 compound
-        cmds.append(f'data modify storage {self.ctx.namespace}:data {target_path} set value {{}}')
 
         for fname, ftype in fields.items():
             field_target = f"{target_path}.{fname}"

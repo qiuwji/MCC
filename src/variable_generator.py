@@ -73,11 +73,16 @@ class VariableGenerator:
         self._emit(self.builder.set_score(f"{resolved_storage}_len", "_tmp", length))
 
     def _generate_struct_array(self, resolved_storage: str, items: list, elem_type: TypeDesc):
-        """结构体数组初始化"""
+        """结构体数组初始化 - 修复空数组索引越界问题"""
         from struct_generator import StructGenerator
         struct_gen = StructGenerator(self.ctx, self.builder)
 
-        self._emit(f'data modify storage {self.ctx.namespace}:data {resolved_storage} set value []')
+        length = len(items)
+        placeholders = ["{}"] * length
+        self._emit(
+            f'data modify storage {self.ctx.namespace}:data {resolved_storage} set value [{",".join(placeholders)}]')
+
+        # 逐个初始化每个结构体元素
         for i, item in enumerate(items):
             elem_path = f"{resolved_storage}[{i}]"
             cmds = struct_gen.gen_struct_init_storage(item, elem_path, elem_type.name)
