@@ -113,6 +113,17 @@ class IndexExpr:
     def __repr__(self): return f"Index({self.base}[{self.index}])"
 
 @dataclass
+class ImportStmt:
+    module: str  # 模块路径，如 "./math.mcc" 或 "std/math"
+    names: Optional[List[str]]  # None表示导入全部，或指定名称列表如 ["sqrt", "abs"]
+    alias: Optional[str] = None  # 命名空间别名（可选，用于 import * as math）
+
+    def __repr__(self):
+        if self.names:
+            return f"Import({', '.join(self.names)} from '{self.module}')"
+        return f"Import(* from '{self.module}')"
+
+@dataclass
 class SelectorExpr:
     raw:str
     def __repr__(self): return f"Selector({self.raw})"

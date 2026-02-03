@@ -127,13 +127,12 @@ class ExprGenerator:
         left = self.builder.get_temp_var()
         right = self.builder.get_temp_var()
 
-        # 先分析操作数类型（用于确定是否需要转换）
+        # 推断操作数类型
         from semant import INT, FLOAT
         left_type = self._infer_expr_type(expr.left)
         right_type = self._infer_expr_type(expr.right)
 
-        # 生成操作数代码，根据上下文传递目标类型
-        # 如果一边是 float，另一边 int 需要转为 float
+        # 如果一边是 float，另一边 int 需要转为 float（自动×100）
         left_target = FLOAT if (left_type == INT and right_type == FLOAT) else left_type
         right_target = FLOAT if (right_type == INT and left_type == FLOAT) else right_type
 
@@ -145,7 +144,6 @@ class ExprGenerator:
         if expr.op in ('<', '>', '<=', '>=', '==', '!='):
             op_map = {'<': '<', '>': '>', '<=': '<=', '>=': '>=', '==': '=', '!=': '='}
             op = op_map[expr.op]
-            # 比较前确保单位一致（如果一边是 float，左边已经转了，右边也转了，直接比）
             cmds.append(f"execute if score {left} _tmp {op} {right} _tmp run "
                         f"scoreboard players set {target_var} _tmp 1")
             cmds.append(f"execute unless score {left} _tmp {op} {right} _tmp run "
@@ -153,15 +151,15 @@ class ExprGenerator:
         else:
             op_map = {'+': '+=', '-': '-=', '*': '*=', '/': '/='}
             if expr.op == '*':
-                # 定点数乘法：结果需要除 100
                 cmds.append(f"scoreboard players operation {target_var} _tmp *= {right} _tmp")
-                cmds.append(f"scoreboard players operation {target_var} _tmp /= _const100 _tmp")
+                if left_type == FLOAT or right_type == FLOAT:
+                    cmds.append(f"scoreboard players operation {target_var} _tmp /= _const100 _tmp")
             elif expr.op == '/':
-                # 定点数除法：先乘 100 再除
-                cmds.append(f"scoreboard players operation {target_var} _tmp *= _const100 _tmp")
+                if left_type == FLOAT or right_type == FLOAT:
+                    cmds.append(f"scoreboard players operation {target_var} _tmp *= _const100 _tmp")
                 cmds.append(f"scoreboard players operation {target_var} _tmp /= {right} _tmp")
             else:
-                # + 和 - 直接操作，因为两边都已经 ×100 了
+                # + 和 - 不需要特殊处理
                 cmds.append(self.builder.op_score(op_map[expr.op], target_var, "_tmp", right, "_tmp"))
 
         return cmds

@@ -28,28 +28,14 @@ class GeneratorContext:
         self.tick_function: Optional[Any] = None
         self.current_mcfunc: Optional[Any] = None
 
+        self.entity_tags: Dict[str, str] = {}
+        self.entity_counter = 0
+
     def push_block(self) -> int:
         self.block_counter += 1
         self.block_stack.append(self.block_counter)
         self.block_vars[self.block_counter] = []
         return self.block_counter
-
-    def pop_block(self) -> List[Tuple[str, str]]:
-        """返回需清理的变量列表 (var_name, storage)"""
-        if not self.block_stack:
-            return []
-        block_id = self.block_stack.pop()
-        block_prefix = f"_blk{block_id}_"
-
-        vars_to_clean = []
-        for var_name, (storage, var_type) in list(self.var_map.items()):
-            if (block_prefix in storage and
-                    var_type.kind not in ('array', 'struct', 'entity')):
-                vars_to_clean.append((var_name, storage))
-
-        if block_id in self.block_vars:
-            del self.block_vars[block_id]
-        return vars_to_clean
 
     def get_storage_name(self, var_name: str, is_param: bool = False) -> str:
         if self.current_function is None:
@@ -97,3 +83,44 @@ class GeneratorContext:
 
     def get_var(self, name: str) -> Tuple[str, TypeDesc]:
         return self.var_map.get(name, (name, UNKNOWN))
+
+    def allocate_entity_tag(self, var_name: str) -> str:
+        """为实体变量分配唯一tag"""
+        self.entity_counter += 1
+        tag = f"__mcc_ent_{self.entity_counter}_{var_name}"
+        self.entity_tags[var_name] = tag
+        return tag
+
+    def get_entity_tag(self, var_name: str) -> Optional[str]:
+        """获取变量对应的实体tag"""
+        return self.entity_tags.get(var_name)
+
+    def pop_block(self) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
+        """返回 (普通变量清理列表, 实体标签清理列表)"""
+        if not self.block_stack:
+            return [], []
+
+        block_id = self.block_stack.pop()
+        block_prefix = f"_blk{block_id}_"
+
+        # 1. 普通变量清理（原有逻辑）
+        vars_to_clean = []
+        for var_name, (storage, var_type) in list(self.var_map.items()):
+            if (block_prefix in storage and
+                    var_type.kind not in ('array', 'struct', 'entity')):
+                vars_to_clean.append((var_name, storage))
+
+        # 2. 实体标签清理（关键修正）
+        entities_to_clean = []
+        # 检查当前块声明的变量中是否有实体
+        if block_id in self.block_vars:
+            for var_name in self.block_vars[block_id]:
+                if var_name in self.entity_tags:  # 如果是实体变量
+                    tag_name = self.entity_tags[var_name]
+                    entities_to_clean.append((var_name, tag_name))
+                    # 从全局跟踪中移除（避免重复清理）
+                    del self.entity_tags[var_name]
+
+            del self.block_vars[block_id]
+
+        return vars_to_clean, entities_to_clean

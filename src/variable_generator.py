@@ -36,9 +36,26 @@ class VariableGenerator:
             self._generate_numeric(stmt, resolved_storage, var_type)
 
     def _generate_selector(self, stmt: LetStmt, var_type: TypeDesc):
-        """处理实体选择器变量声明"""
-        self.ctx.add_var(stmt.name, stmt.expr.raw, var_type)
+        """处理实体选择器变量声明 - 使用标签固定引用"""
 
+        # 生成唯一tag
+        entity_tag = self.ctx.allocate_entity_tag(stmt.name)
+
+        # 1. 给实体打tag（使用原始选择器）
+        selector = stmt.expr.raw  # 原始选择器如 @e[type=zombie,limit=1]
+
+        base_selector = selector.replace(',limit=1', '').replace('limit=1', '')
+        if not base_selector.endswith(']'):
+            base_selector += ']'
+
+        # 生成：tag @e[...] add __mcc_ent_x_name
+        self._emit(f"tag {base_selector} add {entity_tag}")
+
+        # 2. 存储为tag选择器（固定引用）
+        tagged_selector = f"@e[tag={entity_tag},limit=1]"
+        self.ctx.add_var(stmt.name, tagged_selector, var_type)
+
+        # 3. 记录到block_vars以便清理
         if self.ctx.block_stack:
             current_block = self.ctx.block_stack[-1]
             if current_block not in self.ctx.block_vars:

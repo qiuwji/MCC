@@ -263,7 +263,7 @@ class ControlFlowGenerator:
             self._emit(self.builder.function_call(f"{func_base}_entry", macro_args))
 
     def _generate_if_impl(self, stmt: IfStmt):
-        """If语句实现"""
+        """If语句实现 """
         cond_temp = self.builder.get_temp_var()
         cmds = self.expr_gen.gen_expr_to(stmt.cond, cond_temp)
         for cmd in cmds:
@@ -299,6 +299,9 @@ class ControlFlowGenerator:
         self.ctx.push_block()
         for s in stmt.then_block:
             self.stmt_gen.gen_stmt(s, then_func)
+
+        self._cleanup_block_entities()
+
         self.ctx.pop_block()
 
         # 生成 else 块（如果存在）
@@ -308,7 +311,28 @@ class ControlFlowGenerator:
             self.ctx.push_block()
             for s in stmt.else_block:
                 self.stmt_gen.gen_stmt(s, else_func)
+
+            self._cleanup_block_entities()
+
             self.ctx.pop_block()
 
         self.ctx.current_macro_args = saved_macro_args
         self.ctx.current_mcfunc = old_func
+
+    def _cleanup_block_entities(self):
+        """清理当前块中声明的实体标签"""
+        if not self.ctx.block_stack:
+            return
+
+        # 获取当前块ID
+        block_id = self.ctx.block_stack[-1]
+
+        # 查找当前块声明的实体变量（在block_vars中）
+        if block_id in self.ctx.block_vars:
+            for var_name in list(self.ctx.block_vars[block_id]):
+                if var_name in self.ctx.entity_tags:
+                    tag_name = self.ctx.entity_tags[var_name]
+                    # 生成清理指令
+                    self._emit(f"tag @e[tag={tag_name}] remove {tag_name}")
+                    # 从全局跟踪中移除，避免重复清理
+                    del self.ctx.entity_tags[var_name]

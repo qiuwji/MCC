@@ -242,10 +242,11 @@ class CodeGenerator:
         self.ctx.current_function = None
 
     def _gen_cleanup(self):
-        """生成函数退出时的清理代码"""
+        """生成函数退出时的清理代码 - 包含实体标签"""
         func_prefix = f"{self.ctx.current_function}_"
-        vars_to_clean = []
 
+        # 1. 清理普通变量（原有逻辑）
+        vars_to_clean = []
         for var_name, (storage, var_type) in list(self.ctx.var_map.items()):
             if var_name in self.ctx.struct_params:
                 continue
@@ -253,6 +254,7 @@ class CodeGenerator:
                 continue
 
             if var_type.kind == 'struct':
+                # 结构体清理...
                 if var_type.name in self.ctx.structs:
                     for fname, ftype in self.ctx.structs[var_type.name].items():
                         if ftype.is_value_type():
@@ -261,10 +263,12 @@ class CodeGenerator:
                             self.emit(self.builder.set_score(f"{storage}_{fname}_len", "_tmp", 0))
                 if var_name in self.ctx.var_map:
                     del self.ctx.var_map[var_name]
+
             elif var_type.kind == 'array':
                 self.emit(self.builder.set_score(f"{storage}_len", "_tmp", 0))
                 if var_name in self.ctx.var_map:
                     del self.ctx.var_map[var_name]
+
             elif var_type.kind == 'prim':
                 vars_to_clean.append((var_name, storage))
 
@@ -272,6 +276,23 @@ class CodeGenerator:
             self.emit(self.builder.set_score(storage, "_tmp", 0))
             if var_name in self.ctx.var_map:
                 del self.ctx.var_map[var_name]
+
+        # 2. 新增：清理实体标签（关键！）
+        self._cleanup_entity_tags()
+
+    def _cleanup_entity_tags(self):
+        """清理当前函数创建的所有实体标签"""
+        if not self.ctx.current_function:
+            return
+
+        # 遍历所有实体变量，移除tag
+        for var_name, tag_name in list(self.ctx.entity_tags.items()):
+            # 只清理当前函数的实体（通过tag前缀判断）
+            if tag_name.startswith(f"__mcc_ent_"):
+                # 生成：tag @e[tag=__mcc_ent_x] remove __mcc_ent_x
+                self.emit(f"tag @e[tag={tag_name}] remove {tag_name}")
+                # 从tracking中移除
+                del self.ctx.entity_tags[var_name]
 
     def _type_from_typenode(self, tn):
         """从 AST TypeNode 转换为 TypeDesc"""

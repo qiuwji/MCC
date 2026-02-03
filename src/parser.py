@@ -44,7 +44,8 @@ def p_stmt(p):
             | expr_stmt
             | cmd_stmt
             | condition_stmt
-            | loot_stmt"""  # ← 添加这一行
+            | loot_stmt
+            | import_stmt"""
     p[0] = p[1]
 
 # ==================== 装饰器系统 ====================
@@ -448,3 +449,21 @@ def p_error(p):
 def parse(data, debug=False):
     parser = yacc.yacc(debug=debug, write_tables=False)
     return parser.parse(data, lexer=lexer)
+
+# ==================== Import 系统 ====================
+
+def p_import_all(p):
+    """import_stmt : IMPORT STRING"""
+    p[0] = ImportStmt(module=p[2], names=None)
+
+def p_import_selective(p):
+    """import_stmt : IMPORT '{' id_list '}' FROM STRING"""
+    p[0] = ImportStmt(module=p[6], names=p[3])
+
+def p_id_list_multi(p):
+    """id_list : id_list ',' IDENT"""
+    p[0] = p[1] + [p[3]]
+
+def p_id_list_single(p):
+    """id_list : IDENT"""
+    p[0] = [p[1]]

@@ -180,12 +180,17 @@ class ExpressionAnalyzer:
         raise SemanticError(f"不能对类型 '{base_type}' 进行索引操作")
 
     def _analyze_SelectorExpr(self, expr: SelectorExpr, _) -> TypeDesc:
+        """分析实体选择器 - 关键修复：limit=1 时视为单个实体"""
         match = _selector_type_re.search(expr.raw)
         if match:
             entity_type = match.group(1)
             t = TypeDesc('entity', subtype=entity_type) if entity_type in self.entity_schema else TypeDesc('entity')
         else:
             t = TypeDesc('entity')
+
+        if 'limit=1' in expr.raw:
+            expr._is_single_entity = True
+            return t
 
         if expr.raw.startswith('@e') or expr.raw.startswith('@a'):
             t = TypeDesc('array', elem=t)

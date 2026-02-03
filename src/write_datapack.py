@@ -123,29 +123,41 @@ class DatapackWriter:
         if not CodeGenerator:
             raise RuntimeError("无法编译：缺少 CodeGenerator 模块。")
 
-        # 读取代码
+        # 读取代码并确定基础路径（用于相对导入）
         if isinstance(source, (str, Path)) and os.path.exists(source):
+            source_path = Path(source).resolve()
             with open(source, 'r', encoding='utf-8') as f:
                 code = f.read()
+            # 基础路径为源文件所在目录，用于解析相对导入
+            base_path = source_path.parent
         else:
+            # 直接传入代码字符串的情况
             code = str(source)
+            base_path = Path(".")
 
         print(f"[Compiler] 正在编译命名空间: {self.namespace} (MC {self.mc_version}, format {self.pack_format})...")
 
         try:
-            # 语法分析
+            # 1. 语法分析
             ast = parse(code)
+            print(f"[Compiler] 语法分析完成，顶层语句数: {len(ast.stmts)}")
 
-            # 语义分析
+            # 2. 解析并合并导入（关键新增）
+            from import_resolver import merge_imports
+            print(f"[Compiler] 正在解析模块依赖...")
+            ast = merge_imports(ast, base_path)
+            print(f"[Compiler] 模块合并完成，总声明数: {len(ast.stmts)}")
+
+            # 3. 语义分析（现在能看到导入的函数和结构体签名）
             self.analyzer.analyze(ast)
+            print(f"[Compiler] 语义分析通过")
 
-            # 代码生成
+            # 4. 代码生成
             gen = CodeGenerator(namespace=self.namespace)
             generated_files = gen.generate(ast)
 
-            # 添加到文件列表（稍后统一规范化）
+            # 修复 JSON 内容格式
             for path, content in generated_files.items():
-                # 修复 JSON 内容格式
                 if path.endswith('.json') and isinstance(content, list):
                     if content and isinstance(content[0], str):
                         try:

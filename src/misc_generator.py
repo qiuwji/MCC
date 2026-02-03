@@ -16,7 +16,34 @@ class MiscGenerator:
         self.stmt_gen._emit(cmd)
 
     def generate_return(self, stmt: ReturnStmt):
-        """生成return语句"""
+        """生成return语句 - 确保先清理实体标签避免泄漏"""
+
+        # 关键新增：在return前清理当前函数创建的实体标签（只清理局部变量，不清理参数）
+        if self.ctx.current_function:
+            func_prefix = f"{self.ctx.current_function}_"
+
+            # 使用list复制避免遍历时修改字典
+            for var_name, tag_name in list(self.ctx.entity_tags.items()):
+                storage, var_type = self.ctx.get_var(var_name)
+
+                # 只清理局部实体变量（通过路径判断）
+                # 局部变量：以"函数名_"开头 或 是标签选择器 "@e[tag=..."
+                # 参数：通常是 "@s" 或 "$(param)"，不会匹配
+                is_local_entity = (
+                        var_type and
+                        var_type.kind == 'entity' and
+                        storage and
+                        (storage.startswith(func_prefix) or  # 如 "main_mob"
+                         storage.startswith('@e[tag='))  # 已转换的选择器
+                )
+
+                if is_local_entity:
+                    self._emit(f"tag @e[tag={tag_name}] remove {tag_name}")
+                    # 从跟踪中移除，避免重复清理
+                    if var_name in self.ctx.entity_tags:
+                        del self.ctx.entity_tags[var_name]
+
+        # ========== 原有return逻辑（完全不变）==========
         if not stmt.expr:
             return
 
@@ -26,6 +53,7 @@ class MiscGenerator:
         if self.ctx.current_function and self.ctx.current_function in self.ctx.funcs:
             _, ret_type, _ = self.ctx.funcs[self.ctx.current_function]
 
+        # 处理结构体构造函数返回: StructName({...})
         if isinstance(stmt.expr, CallExpr) and getattr(stmt.expr, '_is_struct_constructor', False):
             struct_name = getattr(stmt.expr, '_struct_name', None)
             if struct_name and struct_name in self.ctx.structs and stmt.expr.args:
@@ -35,6 +63,7 @@ class MiscGenerator:
                     self._generate_struct_return(ret_var, struct_name, fields_dict)
             return
 
+        # 处理结构体字面量返回: {...}
         if isinstance(stmt.expr, (StructLiteral, ObjectLiteral)):
             struct_type = getattr(stmt.expr, '_type', None)
             if struct_type and struct_type.kind == 'struct':
@@ -45,6 +74,7 @@ class MiscGenerator:
                     self._generate_struct_return(ret_var, struct_name, provided)
             return
 
+        # 处理标识符返回（可能是结构体）
         if isinstance(stmt.expr, Ident):
             var_type = self.ctx.get_var(stmt.expr.name)[1]
             if var_type and var_type.kind == 'struct':
@@ -56,6 +86,7 @@ class MiscGenerator:
                     self._emit(cmd)
                 return
 
+        # 普通表达式返回
         cmds = self.expr_gen.gen_expr_to(stmt.expr, ret_var, ret_type)
         for cmd in cmds:
             self._emit(cmd)

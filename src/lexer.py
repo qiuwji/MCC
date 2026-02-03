@@ -19,6 +19,8 @@ reserved = {
     'entity': 'ENTITY',
     'tag': 'TAG',
     'loot': 'LOOT',
+    'import': 'IMPORT',
+    'from': 'FROM',
 }
 
 tokens = [
