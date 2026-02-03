@@ -21,13 +21,15 @@ reserved = {
     'loot': 'LOOT',
     'import': 'IMPORT',
     'from': 'FROM',
+    'and': 'AND',
+    'AND': 'AND',
 }
 
 tokens = [
     'IDENT', 'INT', 'FLOAT', 'STRING', 'SELECTOR',
     'DOT',
     'DOTDOT',
-    'PLUS', 'MINUS', 'TIMES', 'DIV',
+    'PLUS', 'MINUS', 'TIMES', 'DIV', 'MOD',
     'ARROW',
     'LT', 'GT', 'LE', 'GE', 'EQ', 'NE',
     'DOLLAR',
@@ -44,6 +46,7 @@ t_EQ = r'=='
 t_NE = r'!='
 t_LT = r'<'
 t_GT = r'>'
+t_MOD = r'%'
 
 t_DOTDOT = r'\.\.'
 t_PLUS = r'\+'

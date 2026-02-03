@@ -7,14 +7,16 @@ from lexer import lexer, tokens
 start = 'program'
 
 precedence = (
-    ('left', 'DOT'),
-    ('nonassoc', 'EQ', 'NE'),
-    ('nonassoc', 'LT', 'GT', 'LE', 'GE'),
+    ('left', 'AND'),      # 逻辑与，较低优先级
+    ('nonassoc', 'EQ', 'NE'),  # ==, !=
+    ('nonassoc', 'LT', 'GT', 'LE', 'GE'),  # <, >, <=, >=
     ('left', 'PLUS', 'MINUS'),
-    ('left', 'TIMES', 'DIV'),
+    ('left', 'TIMES', 'DIV', 'MOD'),
     ('right', 'UMINUS'),
-    ('left', '['),
+    ('left', 'DOT'),      # 点号，高优先级（应该在 AND 之后）
+    ('left', '['),        # 数组索引，高优先级
 )
+
 
 # ==================== 程序结构 ====================
 
@@ -25,6 +27,10 @@ def p_program(p):
 def p_stmt_list_multi(p):
     "stmt_list : stmt_list stmt"
     p[0] = p[1] + [p[2]]
+
+def p_expr_and(p):
+    """expr : expr AND expr"""
+    p[0] = BinOp('and', p[1], p[3])
 
 def p_stmt_list_single(p):
     "stmt_list : stmt"
@@ -299,7 +305,8 @@ def p_expr_binop(p):
     """expr : expr PLUS expr
             | expr MINUS expr
             | expr TIMES expr
-            | expr DIV expr"""
+            | expr DIV expr
+            | expr MOD expr"""
     p[0] = BinOp(p[2], p[1], p[3])
 
 def p_expr_index(p):

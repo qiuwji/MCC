@@ -123,12 +123,23 @@ class ExprGenerator:
         return cmds
 
     def _gen_binop(self, expr: BinOp, target_var: str) -> List[str]:
+        """生成二元运算代码 - 支持 AND、==、!=、比较和算术运算"""
+
+        # 处理逻辑与运算 AND（短路求值）
+        if expr.op == 'and':
+            return self._gen_and_op(expr, target_var)
+
+        # 处理相等和不等（支持 bool 和数字类型）
+        if expr.op in ('==', '!='):
+            return self._gen_equality_op(expr, target_var)
+
+        # 处理其他运算（原有逻辑）
         cmds = []
         left = self.builder.get_temp_var()
         right = self.builder.get_temp_var()
 
         # 推断操作数类型
-        from semant import INT, FLOAT
+        from semant import INT, FLOAT, BOOL
         left_type = self._infer_expr_type(expr.left)
         right_type = self._infer_expr_type(expr.right)
 
@@ -141,15 +152,15 @@ class ExprGenerator:
 
         cmds.append(self.builder.copy_score(target_var, left))
 
-        if expr.op in ('<', '>', '<=', '>=', '==', '!='):
-            op_map = {'<': '<', '>': '>', '<=': '<=', '>=': '>=', '==': '=', '!=': '='}
+        if expr.op in ('<', '>', '<=', '>='):
+            op_map = {'<': '<', '>': '>', '<=': '<=', '>=': '>='}
             op = op_map[expr.op]
             cmds.append(f"execute if score {left} _tmp {op} {right} _tmp run "
                         f"scoreboard players set {target_var} _tmp 1")
             cmds.append(f"execute unless score {left} _tmp {op} {right} _tmp run "
                         f"scoreboard players set {target_var} _tmp 0")
         else:
-            op_map = {'+': '+=', '-': '-=', '*': '*=', '/': '/='}
+            op_map = {'+': '+=', '-': '-=', '*': '*=', '/': '/=', '%': '%='}
             if expr.op == '*':
                 cmds.append(f"scoreboard players operation {target_var} _tmp *= {right} _tmp")
                 if left_type == FLOAT or right_type == FLOAT:
@@ -158,9 +169,61 @@ class ExprGenerator:
                 if left_type == FLOAT or right_type == FLOAT:
                     cmds.append(f"scoreboard players operation {target_var} _tmp *= _const100 _tmp")
                 cmds.append(f"scoreboard players operation {target_var} _tmp /= {right} _tmp")
+            elif expr.op == '%':
+                cmds.append(f"scoreboard players operation {target_var} _tmp %= {right} _tmp")
             else:
                 # + 和 - 不需要特殊处理
                 cmds.append(self.builder.op_score(op_map[expr.op], target_var, "_tmp", right, "_tmp"))
+
+        return cmds
+
+    def _gen_and_op(self, expr: BinOp, target_var: str) -> List[str]:
+        """生成逻辑与 AND 运算（短路求值）"""
+        cmds = []
+        left_temp = self.builder.get_temp_var()
+
+        # 生成左操作数
+        cmds.extend(self.gen_expr_to(expr.left, left_temp))
+
+        # 默认结果为 0（假）
+        cmds.append(self.builder.set_score(target_var, "_tmp", 0))
+
+        # 计算右操作数（只有在左为真时才会执行结果赋值）
+        right_temp = self.builder.get_temp_var()
+        right_cmds = self.gen_expr_to(expr.right, right_temp)
+
+        # 将右操作数计算包装在 execute if score left matches 1.. run 中
+        for cmd in right_cmds:
+            wrapped_cmd = f"execute if score {left_temp} _tmp matches 1.. run {cmd}"
+            cmds.append(wrapped_cmd)
+
+        # 如果左边为真，将右边结果复制到目标
+        copy_cmd = self.builder.copy_score(target_var, right_temp)
+        wrapped_copy = f"execute if score {left_temp} _tmp matches 1.. run {copy_cmd}"
+        cmds.append(wrapped_copy)
+
+        return cmds
+
+    def _gen_equality_op(self, expr: BinOp, target_var: str) -> List[str]:
+        """生成相等 == 和不等 != 运算（支持 bool 和数字）"""
+        cmds = []
+        left = self.builder.get_temp_var()
+        right = self.builder.get_temp_var()
+
+        # 生成两边操作数（bool 也是用 0/1 存储的 scoreboard）
+        cmds.extend(self.gen_expr_to(expr.left, left))
+        cmds.extend(self.gen_expr_to(expr.right, right))
+
+        if expr.op == '==':
+            # 相等：先设为0，如果相等设为1
+            cmds.append(self.builder.set_score(target_var, "_tmp", 0))
+            cmds.append(f"execute if score {left} _tmp = {right} _tmp run "
+                        f"scoreboard players set {target_var} _tmp 1")
+        else:  # '!='
+            # 不等：先设为1，如果相等设为0
+            cmds.append(self.builder.set_score(target_var, "_tmp", 1))
+            cmds.append(f"execute if score {left} _tmp = {right} _tmp run "
+                        f"scoreboard players set {target_var} _tmp 0")
 
         return cmds
 
@@ -352,6 +415,7 @@ class ExprGenerator:
     def _gen_index(self, expr: IndexExpr, target_var: str) -> List[str]:
         base_type = getattr(expr.base, '_type', UNKNOWN)
 
+        # 处理嵌套索引（如 arr[field][index]）
         if isinstance(expr.base, IndexExpr):
             inner_base = expr.base.base
             field_expr = expr.base.index
@@ -376,6 +440,16 @@ class ExprGenerator:
                         branch = self.builder.execute_if_score_matches(idx_temp, "_tmp", str(i), store_cmd)
                         cmds.append(branch)
                     return cmds
+
+        # ========== 关键修复：支持 FieldAccess（如 game.board） ==========
+        if isinstance(expr.base, FieldAccess):
+            # 使用 _get_storage_path 获取完整路径（如 game_board）
+            base_path = self._get_storage_path(expr.base)
+            if base_path:
+                arr_path = self.ctx.resolve_storage(base_path)
+                elem_type = base_type.elem if base_type and base_type.kind == 'array' else UNKNOWN
+                return self._gen_array_index_impl(expr, target_var, arr_path, elem_type)
+            return []
 
         if base_type.kind == 'array':
             return self._gen_array_index(expr, target_var, base_type)
@@ -411,18 +485,33 @@ class ExprGenerator:
         return []
 
     def _gen_array_index(self, expr: IndexExpr, target_var: str, arr_type: TypeDesc) -> List[str]:
-        arr_storage, _ = self.ctx.get_var(expr.base.name)
-        arr_path = self.ctx.resolve_storage(arr_storage)  # storage 中的路径，如 "player_items"
-        elem_type = arr_type.elem if arr_type.elem else UNKNOWN
+        """处理数组索引 - 现在支持 Ident 和 FieldAccess"""
+        # 获取数组 storage 路径（支持 game.board 这种 FieldAccess）
+        if isinstance(expr.base, Ident):
+            arr_storage, _ = self.ctx.get_var(expr.base.name)
+            arr_path = self.ctx.resolve_storage(arr_storage)
+        elif isinstance(expr.base, FieldAccess):
+            arr_path = self._get_storage_path(expr.base)
+            arr_path = self.ctx.resolve_storage(arr_path) if arr_path else None
+        else:
+            return []
 
+        if not arr_path:
+            return []
+
+        elem_type = arr_type.elem if arr_type.elem else UNKNOWN
+        return self._gen_array_index_impl(expr, target_var, arr_path, elem_type)
+
+    def _gen_array_index_impl(self, expr: IndexExpr, target_var: str, arr_path: str, elem_type: TypeDesc) -> List[str]:
+        """数组索引生成的具体实现"""
         cmds = []
 
         if isinstance(expr.index, IntLiteral):
-            # 编译期常量索引：直接访问 storage
+            # 编译期常量索引
             idx = expr.index.value
 
             if elem_type.kind == 'struct':
-                # 将结构体从 storage 复制到 target_var（storage 路径）
+                # 结构体数组元素复制
                 fields = self.ctx.structs.get(elem_type.name, {})
                 for fname, ftype in fields.items():
                     src = f"{arr_path}[{idx}].{fname}"
@@ -435,35 +524,27 @@ class ExprGenerator:
                         cmds.append(
                             f'execute store result score {dst} _tmp run data get storage {self.ctx.namespace}:data {src} {scale}')
             elif elem_type.kind == 'prim' and elem_type.name == 'string':
-                # 字符串元素：storage to storage 复制
+                # 字符串数组
                 src = f"{arr_path}[{idx}]"
                 cmds.append(self.builder.data_copy_storage(target_var, src))
             else:
-                # 基础数值类型：data get 到 scoreboard
+                # 基础数值类型
                 scale = 1 if elem_type.name == 'int' else 0.01
                 cmds.append(
                     f'execute store result score {target_var} _tmp run data get storage {self.ctx.namespace}:data {arr_path}[{idx}] {scale}')
-
         else:
-            # 运行期动态索引：使用宏命令
-
-            # 1. 计算索引值到 storage
+            # 运行期动态索引（使用宏命令）
             idx_temp = self.builder.get_temp_var()
             cmds.extend(self.gen_expr_to(expr.index, idx_temp))
             cmds.append(
                 f'execute store result storage {self.ctx.namespace}:data __args.index int 1 run scoreboard players get {idx_temp} _tmp')
 
-            # 2. 设置路径参数
-            # Bug修复：如果是宏参数（以$开头），不加引号，且命令本身需要使用宏前缀 $
             if arr_path.startswith('$'):
-                # 宏参数：$(height) 形式，直接使用，不加引号
                 cmds.append(f'$data modify storage {self.ctx.namespace}:data __args.path set value {arr_path}')
             else:
-                # 普通路径：加引号
                 cmds.append(f'data modify storage {self.ctx.namespace}:data __args.path set value "{arr_path}"')
 
             if elem_type.kind == 'struct':
-                # 结构体：需要逐个字段获取
                 fields = self.ctx.structs.get(elem_type.name, {})
                 for fname, ftype in fields.items():
                     cmds.append(f'data modify storage {self.ctx.namespace}:data __args.field set value "{fname}"')
@@ -478,13 +559,11 @@ class ExprGenerator:
                         cmds.append(f'data modify storage {self.ctx.namespace}:data __args.type set value "{type_str}"')
                         cmds.append(
                             f'function {self.ctx.namespace}:__array_get_field with storage {self.ctx.namespace}:data __args')
-
             elif elem_type.kind == 'prim' and elem_type.name == 'string':
                 cmds.append(f'data modify storage {self.ctx.namespace}:data __args.target set value "{target_var}"')
                 cmds.append(
                     f'function {self.ctx.namespace}:__array_get_string with storage {self.ctx.namespace}:data __args')
             else:
-                # 基础数值
                 type_str = "int" if elem_type.name == 'int' else "double"
                 cmds.append(f'data modify storage {self.ctx.namespace}:data __args.target set value "{target_var}"')
                 cmds.append(f'data modify storage {self.ctx.namespace}:data __args.type set value "{type_str}"')
@@ -522,7 +601,7 @@ class ExprGenerator:
                     return [self.builder.copy_score(target_var, resolved)]
             return []
 
-        # 情况3：实体 NBT 嵌套访问（包括嵌套如 pos.x）<extra_cmd>
+        # 情况3：实体 NBT 嵌套访问（包括嵌套如 pos.x）
         if getattr(expr, '_is_entity_attr', False):
             # 获取实体选择器
             selector = self._get_entity_selector(expr.base)
@@ -548,7 +627,6 @@ class ExprGenerator:
 
         return []
 
-
     def _get_base_name(self, expr) -> Optional[str]:
         """从表达式中提取基础变量名"""
         if isinstance(expr, Ident):
@@ -556,7 +634,6 @@ class ExprGenerator:
         elif isinstance(expr, FieldAccess):
             return self._get_base_name(expr.base)
         return None
-
 
     def _get_storage_path(self, expr) -> Optional[str]:
         """递归构建storage路径（用于struct字段链）"""
@@ -568,7 +645,6 @@ class ExprGenerator:
             if base:
                 return f"{base}_{expr.field}"
         return None
-
 
     def _get_entity_selector(self, expr) -> Optional[str]:
         """从表达式中提取实体选择器"""

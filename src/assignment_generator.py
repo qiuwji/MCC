@@ -203,14 +203,27 @@ class AssignmentGenerator:
             self._emit(cmd)
 
     def _generate_array(self, target: IndexExpr, temp: str):
-        """数组元素赋值"""
-        arr_storage, arr_type = self.ctx.get_var(target.base.name)
-        arr_path = self.ctx.resolve_storage(arr_storage)
+        """数组元素赋值 - 关键修复：支持 FieldAccess（如 game.board）"""
+        # 获取数组路径（支持 Ident 和 FieldAccess）
+        if isinstance(target.base, Ident):
+            arr_storage, arr_type = self.ctx.get_var(target.base.name)
+            arr_path = self.ctx.resolve_storage(arr_storage)
+        elif isinstance(target.base, FieldAccess):
+            base_path = self._get_storage_path(target.base)
+            arr_path = self.ctx.resolve_storage(base_path) if base_path else None
+            # ========== 关键修复：从 FieldAccess 节点本身获取类型（它是数组类型）==========
+            arr_type = getattr(target.base, '_type', UNKNOWN)
+        else:
+            return
+
+        if not arr_path:
+            return
+
         elem_type = arr_type.elem if arr_type else UNKNOWN
 
         if isinstance(target.index, IntLiteral):
             idx = target.index.value
-            if elem_type.kind == 'struct':
+            if elem_type and elem_type.kind == 'struct':  # 添加空检查
                 from struct_generator import StructGenerator
                 struct_gen = StructGenerator(self.ctx, self.builder)
                 for cmd in struct_gen.gen_struct_copy(f"{arr_path}_{idx}", temp, elem_type.name):
@@ -220,8 +233,31 @@ class AssignmentGenerator:
         else:
             self._generate_array_dynamic(arr_path, target.index, temp, elem_type)
 
+    def _get_base_var_name(self, expr) -> Optional[str]:
+        """从 FieldAccess 链中提取根变量名"""
+        if isinstance(expr, Ident):
+            return expr.name
+        elif isinstance(expr, FieldAccess):
+            return self._get_base_var_name(expr.base)
+        return None
+
+    def _get_storage_path(self, expr) -> Optional[str]:
+        """递归构建storage路径"""
+        if isinstance(expr, Ident):
+            storage, _ = self.ctx.get_var(expr.name)
+            return self.ctx.resolve_storage(storage)
+        elif isinstance(expr, FieldAccess):
+            base = self._get_storage_path(expr.base)
+            if base:
+                return f"{base}_{expr.field}"
+        return None
+
     def _generate_array_dynamic(self, arr_path: str, index_expr, temp: str, elem_type: TypeDesc):
         """数组动态索引赋值"""
+        # 防御性检查
+        if elem_type is None:
+            elem_type = UNKNOWN
+
         idx_cmds = self.expr_gen.gen_expr_to(index_expr, "_idx")
         for cmd in idx_cmds:
             self._emit(cmd)
@@ -304,17 +340,6 @@ class AssignmentGenerator:
                 f"execute store result entity {selector} {nbt_path} {store_type} {scale} "
                 f"run scoreboard players get {temp} _tmp"
             )
-
-    def _get_storage_path(self, expr):
-        """递归构建storage路径"""
-        if isinstance(expr, Ident):
-            storage, _ = self.ctx.get_var(expr.name)
-            return self.ctx.resolve_storage(storage)
-        elif isinstance(expr, FieldAccess):
-            base = self._get_storage_path(expr.base)
-            if base:
-                return f"{base}_{expr.field}"
-        return None
 
     def _get_entity_selector(self, expr):
         """提取实体选择器"""

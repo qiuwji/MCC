@@ -102,9 +102,34 @@ class ExpressionAnalyzer:
                 raise SemanticError(f"算术运算需要数字类型")
             return FLOAT if (left_type == FLOAT or right_type == FLOAT) else INT
 
-        elif expr.op in ('<', '>', '<=', '>=', '==', '!='):
+        elif expr.op == '%':
+            if not (left_type.is_numeric() and right_type.is_numeric()):
+                raise SemanticError(f"取模运算需要数字类型")
+            return INT
+
+        elif expr.op in ('==', '!='):
+            # 修复：相等/不等可以比较任何相同类型，或数字类型之间
+            if left_type.equals(right_type):
+                return BOOL
+            if left_type.is_numeric() and right_type.is_numeric():
+                return BOOL
+            # 允许 int 与 float 比较
+            if left_type.is_numeric() and right_type.is_numeric():
+                return BOOL
+            raise SemanticError(f"类型不匹配: 不能比较 {left_type} 和 {right_type}")
+
+        elif expr.op in ('<', '>', '<=', '>='):
+            # 这些只适用于数字
             if not (left_type.is_numeric() and right_type.is_numeric()):
                 raise SemanticError(f"比较运算需要数字类型")
+            return BOOL
+
+        elif expr.op == 'and':
+            # 逻辑与要求两边都是 bool 类型
+            if left_type != BOOL:
+                raise SemanticError(f"逻辑与运算左操作数必须是 bool 类型，得到 {left_type}")
+            if right_type != BOOL:
+                raise SemanticError(f"逻辑与运算右操作数必须是 bool 类型，得到 {right_type}")
             return BOOL
 
         raise SemanticError(f"未知运算符: {expr.op}")
